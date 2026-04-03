@@ -1,0 +1,21 @@
+{
+  "name": "@verin/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "generate": "openapi-typescript ../../docs/openapi.yaml --output src/generated.ts"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.14.0"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.8.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

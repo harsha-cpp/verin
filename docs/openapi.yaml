@@ -1,0 +1,1406 @@
+openapi: 3.1.0
+info:
+  title: Verin DMS API
+  version: 0.1.0
+  description: REST API for the Verin document management MVP.
+servers:
+  - url: http://localhost:8080
+    description: Local API
+tags:
+  - name: Auth
+  - name: Documents
+  - name: Search
+  - name: Audit
+  - name: Admin
+  - name: Comments
+  - name: Notifications
+paths:
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      responses:
+        '204':
+          description: Logged out
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      responses:
+        '200':
+          description: Current session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+  /api/v1/auth/mfa/setup:
+    post:
+      tags: [Auth]
+      responses:
+        '200':
+          description: MFA setup payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MFASetupResponse'
+  /api/v1/auth/mfa/verify:
+    post:
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MFAVerifyRequest'
+      responses:
+        '200':
+          description: MFA verified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+  /api/v1/documents:
+    get:
+      tags: [Documents]
+      parameters:
+        - in: query
+          name: q
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Document list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentListResponse'
+  /api/v1/documents/init-upload:
+    post:
+      tags: [Documents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InitUploadRequest'
+      responses:
+        '200':
+          description: Signed upload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InitUploadResponse'
+  /api/v1/documents/complete-upload:
+    post:
+      tags: [Documents]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteUploadRequest'
+      responses:
+        '200':
+          description: Upload finalized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDetailResponse'
+  /api/v1/documents/{documentId}:
+    get:
+      tags: [Documents]
+      parameters:
+        - $ref: '#/components/parameters/documentId'
+      responses:
+        '200':
+          description: Document detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDetailResponse'
+    patch:
+      tags: [Documents]
+      parameters:
+        - $ref: '#/components/parameters/documentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDocumentRequest'
+      responses:
+        '200':
+          description: Updated document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDetailResponse'
+    delete:
+      tags: [Documents]
+      summary: Soft-delete a document
+      parameters:
+        - $ref: '#/components/parameters/documentId'
+      responses:
+        '204':
+          description: Document soft-deleted
+  /api/v1/documents/{documentId}/archive:
+    post:
+      tags: [Documents]
+      parameters:
+        - $ref: '#/components/parameters/documentId'
+      responses:
+        '204':
+          description: Archived
+  /api/v1/documents/{documentId}/restore:
+    post:
+      tags: [Documents]
+      parameters:
+        - $ref: '#/components/parameters/documentId'
+      responses:
+        '204':
+          description: Restored
+  /api/v1/documents/{documentId}/download:
+    post:
+      tags: [Documents]
+      parameters:
+        - $ref: '#/components/parameters/documentId'
+      responses:
+        '200':
+          description: Download URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignedURLResponse'
+  /api/v1/documents/{documentId}/versions:
+    get:
+      tags: [Documents]
+      parameters:
+        - $ref: '#/components/parameters/documentId'
+      responses:
+        '200':
+          description: Version list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionListResponse'
+  /api/v1/documents/{documentId}/versions/{versionId}/restore:
+    post:
+      tags: [Documents]
+      parameters:
+        - $ref: '#/components/parameters/documentId'
+        - $ref: '#/components/parameters/versionId'
+      responses:
+        '204':
+          description: Restored
+  /api/v1/documents/{documentId}/comments:
+    get:
+      tags: [Comments]
+      parameters:
+        - $ref: '#/components/parameters/documentId'
+      responses:
+        '200':
+          description: Comment list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentListResponse'
+    post:
+      tags: [Comments]
+      parameters:
+        - $ref: '#/components/parameters/documentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommentRequest'
+      responses:
+        '200':
+          description: Created comment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+  /api/v1/search:
+    get:
+      tags: [Search]
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+  /api/v1/search/advanced:
+    post:
+      tags: [Search]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdvancedSearchRequest'
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+  /api/v1/search/saved:
+    get:
+      tags: [Search]
+      responses:
+        '200':
+          description: Saved searches
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedSearchListResponse'
+    post:
+      tags: [Search]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSavedSearchRequest'
+      responses:
+        '200':
+          description: Saved search
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedSearch'
+  /api/v1/audit/events:
+    get:
+      tags: [Audit]
+      responses:
+        '200':
+          description: Audit events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditListResponse'
+  /api/v1/audit/reports/export:
+    post:
+      tags: [Audit]
+      responses:
+        '202':
+          description: Export queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobQueuedResponse'
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      responses:
+        '200':
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationListResponse'
+  /api/v1/notifications/{notificationId}/read:
+    post:
+      tags: [Notifications]
+      parameters:
+        - $ref: '#/components/parameters/notificationId'
+      responses:
+        '204':
+          description: Marked read
+  /api/v1/admin/users:
+    get:
+      tags: [Admin]
+      responses:
+        '200':
+          description: Users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+  /api/v1/admin/users/{userId}/roles:
+    post:
+      tags: [Admin]
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignRolesRequest'
+      responses:
+        '204':
+          description: Roles updated
+  /api/v1/admin/roles:
+    get:
+      tags: [Admin]
+      responses:
+        '200':
+          description: Roles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleListResponse'
+  /api/v1/admin/quotas:
+    get:
+      tags: [Admin]
+      responses:
+        '200':
+          description: Quotas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaListResponse'
+    post:
+      tags: [Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertQuotaRequest'
+      responses:
+        '200':
+          description: Quota
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quota'
+  /api/v1/admin/retention:
+    get:
+      tags: [Admin]
+      responses:
+        '200':
+          description: Retention policies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetentionPolicyListResponse'
+    post:
+      tags: [Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertRetentionPolicyRequest'
+      responses:
+        '200':
+          description: Retention policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetentionPolicy'
+  /api/v1/admin/settings:
+    get:
+      tags: [Admin]
+      responses:
+        '200':
+          description: System settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemSettingListResponse'
+    post:
+      tags: [Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertSettingRequest'
+      responses:
+        '200':
+          description: Setting
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemSetting'
+  /api/v1/admin/jobs:
+    get:
+      tags: [Admin]
+      responses:
+        '200':
+          description: Jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobListResponse'
+  /api/v1/admin/jobs/{jobId}/retry:
+    post:
+      tags: [Admin]
+      parameters:
+        - $ref: '#/components/parameters/jobId'
+      responses:
+        '202':
+          description: Retry queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobQueuedResponse'
+  /api/v1/admin/usage:
+    get:
+      tags: [Admin]
+      responses:
+        '200':
+          description: Usage summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsageSummary'
+  /api/v1/admin/health:
+    get:
+      tags: [Admin]
+      responses:
+        '200':
+          description: Health summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthSummary'
+  /api/v1/documents/{documentId}/share:
+    post:
+      tags: [Sharing]
+      summary: Share document with a user
+      parameters:
+        - $ref: '#/components/parameters/documentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId:
+                  type: string
+                  format: uuid
+                accessLevel:
+                  type: string
+                  default: viewer
+      responses:
+        '204':
+          description: Document shared
+    delete:
+      tags: [Sharing]
+      summary: Revoke document share
+      parameters:
+        - $ref: '#/components/parameters/documentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId:
+                  type: string
+                  format: uuid
+      responses:
+        '204':
+          description: Share revoked
+  /api/v1/shared:
+    get:
+      tags: [Sharing]
+      summary: List documents shared with me
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Shared documents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentListResponse'
+  /api/v1/collections:
+    get:
+      tags: [Collections]
+      summary: List collections
+      responses:
+        '200':
+          description: Collection list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Collection'
+    post:
+      tags: [Collections]
+      summary: Create a collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '200':
+          description: Collection created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collection'
+  /api/v1/collections/{collectionId}:
+    get:
+      tags: [Collections]
+      summary: Get collection with members
+      parameters:
+        - in: path
+          name: collectionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Collection detail with members
+    patch:
+      tags: [Collections]
+      summary: Update collection
+      parameters:
+        - in: path
+          name: collectionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '200':
+          description: Updated
+    delete:
+      tags: [Collections]
+      summary: Delete collection
+      parameters:
+        - in: path
+          name: collectionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted
+  /api/v1/collections/{collectionId}/documents:
+    get:
+      tags: [Collections]
+      summary: List documents in collection
+      parameters:
+        - in: path
+          name: collectionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Document list
+  /api/v1/collections/{collectionId}/members:
+    post:
+      tags: [Collections]
+      summary: Add member to collection
+      parameters:
+        - in: path
+          name: collectionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId:
+                  type: string
+                  format: uuid
+                accessLevel:
+                  type: string
+                  default: member
+      responses:
+        '204':
+          description: Member added
+  /api/v1/collections/{collectionId}/members/{userId}:
+    delete:
+      tags: [Collections]
+      summary: Remove member from collection
+      parameters:
+        - in: path
+          name: collectionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/userId'
+      responses:
+        '204':
+          description: Member removed
+components:
+  parameters:
+    documentId:
+      in: path
+      name: documentId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    versionId:
+      in: path
+      name: versionId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    userId:
+      in: path
+      name: userId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    notificationId:
+      in: path
+      name: notificationId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    jobId:
+      in: path
+      name: jobId
+      required: true
+      schema:
+        type: string
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error, requestId]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+        requestId:
+          type: string
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+    MFAVerifyRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+        setupToken:
+          type: string
+    InitUploadRequest:
+      type: object
+      required: [fileName, mimeType, sizeBytes, checksumSha256]
+      properties:
+        fileName:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+        checksumSha256:
+          type: string
+    CompleteUploadRequest:
+      type: object
+      required: [uploadId, title]
+      properties:
+        uploadId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        collectionId:
+          type: string
+          format: uuid
+        changeSummary:
+          type: string
+        metadata:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetadataValue'
+        tags:
+          type: array
+          items:
+            type: string
+    UpdateDocumentRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        collectionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        metadata:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetadataValue'
+        tags:
+          type: array
+          items:
+            type: string
+    AdvancedSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        limit:
+          type: integer
+        offset:
+          type: integer
+    CreateSavedSearchRequest:
+      type: object
+      required: [name, queryText]
+      properties:
+        name:
+          type: string
+        queryText:
+          type: string
+        filters:
+          type: object
+          additionalProperties: true
+    CreateCommentRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+    AssignRolesRequest:
+      type: object
+      required: [roleIds]
+      properties:
+        roleIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+    UpsertQuotaRequest:
+      type: object
+      required: [targetType, maxStorageBytes, maxDocumentCount]
+      properties:
+        targetType:
+          type: string
+        targetId:
+          type: string
+          format: uuid
+        maxStorageBytes:
+          type: integer
+        maxDocumentCount:
+          type: integer
+    UpsertRetentionPolicyRequest:
+      type: object
+      required: [name, retentionDays]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        appliesToCollectionId:
+          type: string
+          format: uuid
+        retentionDays:
+          type: integer
+        archiveAfterDays:
+          type: integer
+        deleteAfterDays:
+          type: integer
+        enabled:
+          type: boolean
+    UpsertSettingRequest:
+      type: object
+      required: [settingKey, settingValue]
+      properties:
+        settingKey:
+          type: string
+        settingValue:
+          type: object
+          additionalProperties: true
+    AuthResponse:
+      type: object
+      required: [user, requiresMfa, csrfToken]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        requiresMfa:
+          type: boolean
+        csrfToken:
+          type: string
+    SessionResponse:
+      type: object
+      required: [authenticated, csrfToken]
+      properties:
+        authenticated:
+          type: boolean
+        csrfToken:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+    MFASetupResponse:
+      type: object
+      required: [secret, otpauthUrl]
+      properties:
+        secret:
+          type: string
+        otpauthUrl:
+          type: string
+    User:
+      type: object
+      required: [id, email, fullName, status, roles]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        fullName:
+          type: string
+        status:
+          type: string
+        mfaEnabled:
+          type: boolean
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+    Role:
+      type: object
+      required: [id, key, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+    DocumentSummary:
+      type: object
+      required: [id, title, originalFilename, status, mimeType, sizeBytes, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        originalFilename:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+        status:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        currentVersionNumber:
+          type: integer
+        previewStorageKey:
+          type: string
+    MetadataValue:
+      type: object
+      required: [schemaKey]
+      properties:
+        schemaKey:
+          type: string
+        valueText:
+          type: string
+        valueNumber:
+          type: number
+        valueBoolean:
+          type: boolean
+        valueDate:
+          type: string
+          format: date
+        valueJson:
+          type: object
+          additionalProperties: true
+    Tag:
+      type: object
+      required: [id, name, color]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        color:
+          type: string
+    Version:
+      type: object
+      required: [id, versionNumber, mimeType, sizeBytes, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        versionNumber:
+          type: integer
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+        checksumSha256:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        changeSummary:
+          type: string
+    Comment:
+      type: object
+      required: [id, body, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        authorName:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    SignedURLResponse:
+      type: object
+      required: [url, expiresAt]
+      properties:
+        url:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    UploadTicket:
+      type: object
+      required: [id, uploadUrl, objectKey, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        uploadUrl:
+          type: string
+        objectKey:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    InitUploadResponse:
+      type: object
+      required: [upload]
+      properties:
+        upload:
+          $ref: '#/components/schemas/UploadTicket'
+    DocumentDetail:
+      allOf:
+        - $ref: '#/components/schemas/DocumentSummary'
+        - type: object
+          properties:
+            metadata:
+              type: array
+              items:
+                $ref: '#/components/schemas/MetadataValue'
+            tags:
+              type: array
+              items:
+                $ref: '#/components/schemas/Tag'
+            versions:
+              type: array
+              items:
+                $ref: '#/components/schemas/Version'
+            comments:
+              type: array
+              items:
+                $ref: '#/components/schemas/Comment'
+            downloadUrl:
+              type: string
+            collectionName:
+              type: string
+            ocrStatus:
+              type: string
+    SearchHit:
+      type: object
+      required: [documentId, title, rank]
+      properties:
+        documentId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        originalFilename:
+          type: string
+        status:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        rank:
+          type: number
+    AuditEvent:
+      type: object
+      required: [id, action, resourceType, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        action:
+          type: string
+        resourceType:
+          type: string
+        requestId:
+          type: string
+        actorRole:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+    Notification:
+      type: object
+      required: [id, kind, title, body, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+        readAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    SavedSearch:
+      type: object
+      required: [id, name, queryText]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        queryText:
+          type: string
+        filters:
+          type: object
+          additionalProperties: true
+    Quota:
+      type: object
+      required: [id, targetType, maxStorageBytes, maxDocumentCount]
+      properties:
+        id:
+          type: string
+          format: uuid
+        targetType:
+          type: string
+        targetId:
+          type: string
+          format: uuid
+        maxStorageBytes:
+          type: integer
+        maxDocumentCount:
+          type: integer
+    RetentionPolicy:
+      type: object
+      required: [id, name, retentionDays, enabled]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        appliesToCollectionId:
+          type: string
+          format: uuid
+        retentionDays:
+          type: integer
+        archiveAfterDays:
+          type: integer
+        deleteAfterDays:
+          type: integer
+        enabled:
+          type: boolean
+    SystemSetting:
+      type: object
+      required: [settingKey, settingValue]
+      properties:
+        settingKey:
+          type: string
+        settingValue:
+          type: object
+          additionalProperties: true
+    Job:
+      type: object
+      required: [id, jobType, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        jobType:
+          type: string
+        status:
+          type: string
+        errorMessage:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    JobQueuedResponse:
+      type: object
+      required: [jobId, status]
+      properties:
+        jobId:
+          type: string
+        status:
+          type: string
+    UsageSummary:
+      type: object
+      required: [documentCount, storageBytes, userCount]
+      properties:
+        documentCount:
+          type: integer
+        storageBytes:
+          type: integer
+        userCount:
+          type: integer
+    HealthSummary:
+      type: object
+      required: [api, database, redis, storage]
+      properties:
+        api:
+          type: string
+        database:
+          type: string
+        redis:
+          type: string
+        storage:
+          type: string
+        queueDepth:
+          type: integer
+    DocumentListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocumentSummary'
+        total:
+          type: integer
+    DocumentDetailResponse:
+      type: object
+      required: [document]
+      properties:
+        document:
+          $ref: '#/components/schemas/DocumentDetail'
+    VersionListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Version'
+    SearchResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchHit'
+    AuditListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+    CommentListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+    NotificationListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+    SavedSearchListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SavedSearch'
+    UserListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+    RoleListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+    QuotaListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Quota'
+    RetentionPolicyListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetentionPolicy'
+    SystemSettingListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SystemSetting'
+    JobListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Job'
+    Collection:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        createdAt:
+          type: string
+          format: date-time

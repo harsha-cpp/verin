@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["vite/client", "vitest/globals"],
+    "baseUrl": ".",
+    "noEmit": true,
+    "paths": {
+      "@/*": ["src/*"],
+      "@verin/ui": ["../../packages/ui/src/index.ts"],
+      "@verin/ui/*": ["../../packages/ui/src/*"],
+      "@verin/api-client": ["../../packages/api-client/src/index.ts"],
+      "@verin/api-client/*": ["../../packages/api-client/src/*"]
+    }
+  },
+  "include": ["src"]
+}
