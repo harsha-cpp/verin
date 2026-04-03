@@ -53,4 +53,3 @@ Production-minded MVP for a cloud-native document management system with a React
 - OCR, preview generation, notifications, and audit exports are queued through Asynq and handled by the Go worker.
 - The frontend includes premium fallback data so the UI remains inspectable even if the API is not running.
 - Deployment-specific configuration is intentionally deferred.
-# verin
