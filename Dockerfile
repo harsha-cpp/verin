@@ -1,6 +1,4 @@
-FROM golang:1.24-alpine AS builder
-RUN apk add --no-cache git
-ENV GOTOOLCHAIN=auto
+FROM golang:latest AS builder
 WORKDIR /app
 COPY apps/backend/go.mod apps/backend/go.sum ./
 RUN go mod download
