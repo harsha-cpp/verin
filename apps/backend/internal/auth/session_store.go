@@ -24,6 +24,14 @@ type Session struct {
 	PendingMFASecret string    `json:"pending_mfa_secret"`
 	PendingMFASetup  bool      `json:"pending_mfa_setup"`
 	ExpiresAt        time.Time `json:"expires_at"`
+
+	Email       string   `json:"email,omitempty"`
+	FullName    string   `json:"full_name,omitempty"`
+	AvatarURL   string   `json:"avatar_url,omitempty"`
+	Roles       []string `json:"roles,omitempty"`
+	Permissions []string `json:"permissions,omitempty"`
+	IsAdmin     bool     `json:"is_admin,omitempty"`
+	CachedAt    int64    `json:"cached_at,omitempty"`
 }
 
 func NewSessionStore(client *redis.Client) *SessionStore {

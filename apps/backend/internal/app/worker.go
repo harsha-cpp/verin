@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/smtp"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -35,7 +36,10 @@ func (s *Server) handleOCRTask(ctx context.Context, task *asynq.Task) error {
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return err
 	}
+	return s.processOCR(ctx, mustTaskID(ctx), payload)
+}
 
+func (s *Server) processOCR(ctx context.Context, _ string, payload jobs.OCRPayload) error {
 	versionID := MustPGUUID(payload.DocumentVersionID)
 	document, err := s.Queries.GetDocumentByVersionID(ctx, versionID)
 	if err != nil {
@@ -46,24 +50,15 @@ func (s *Server) handleOCRTask(ctx context.Context, task *asynq.Task) error {
 		return err
 	}
 
-	taskID, _ := asynq.GetTaskID(ctx)
-	retryCount, _ := asynq.GetRetryCount(ctx)
-	_ = s.Queries.UpdateJobStatus(ctx, dbgen.UpdateJobStatusParams{
-		TaskID:       taskID,
-		Status:       "processing",
-		AttemptCount: int32(retryCount),
-		ErrorMessage: pgtype.Text{},
-	})
-
 	object, err := s.Storage.GetObject(ctx, version.StorageKey)
 	if err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
 	defer object.Close()
 
 	content, err := io.ReadAll(object)
 	if err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
 
 	var extractedText string
@@ -88,18 +83,12 @@ func (s *Server) handleOCRTask(ctx context.Context, task *asynq.Task) error {
 		ConfidenceScore:   confidence,
 	})
 	if err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
 
 	_ = s.Queries.SetDocumentStatus(ctx, dbgen.SetDocumentStatusParams{
 		ID:     document.ID,
 		Status: "ready",
-	})
-	_ = s.Queries.UpdateJobStatus(ctx, dbgen.UpdateJobStatusParams{
-		TaskID:       taskID,
-		Status:       "completed",
-		AttemptCount: int32(retryCount),
-		ErrorMessage: pgtype.Text{},
 	})
 	return nil
 }
@@ -109,10 +98,14 @@ func (s *Server) handlePreviewTask(ctx context.Context, task *asynq.Task) error 
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return err
 	}
+	return s.processPreview(ctx, mustTaskID(ctx), payload)
+}
+
+func (s *Server) processPreview(ctx context.Context, _ string, payload jobs.PreviewPayload) error {
 	versionID := MustPGUUID(payload.DocumentVersionID)
 	document, err := s.Queries.GetDocumentByVersionID(ctx, versionID)
 	if err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
 	if err := s.Queries.UpsertPreviewAsset(ctx, dbgen.UpsertPreviewAssetParams{
 		DocumentVersionID: versionID,
@@ -120,17 +113,11 @@ func (s *Server) handlePreviewTask(ctx context.Context, task *asynq.Task) error 
 		StorageKey:        payload.StorageKey,
 		Status:            "ready",
 	}); err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
 	_ = s.Queries.SetDocumentStatus(ctx, dbgen.SetDocumentStatusParams{
 		ID:     document.ID,
 		Status: "ready",
-	})
-	_ = s.Queries.UpdateJobStatus(ctx, dbgen.UpdateJobStatusParams{
-		TaskID:       mustTaskID(ctx),
-		Status:       "completed",
-		AttemptCount: int32(mustRetryCount(ctx)),
-		ErrorMessage: pgtype.Text{},
 	})
 	return nil
 }
@@ -140,10 +127,14 @@ func (s *Server) handleNotificationTask(ctx context.Context, task *asynq.Task) e
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return err
 	}
+	return s.processNotification(ctx, mustTaskID(ctx), payload)
+}
+
+func (s *Server) processNotification(ctx context.Context, _ string, payload jobs.NotificationPayload) error {
 	userID := MustPGUUID(payload.UserID)
 	user, err := s.Queries.GetUserByID(ctx, userID)
 	if err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
 	_, err = s.Queries.CreateNotification(ctx, dbgen.CreateNotificationParams{
 		OrgID:       user.OrgID,
@@ -154,19 +145,12 @@ func (s *Server) handleNotificationTask(ctx context.Context, task *asynq.Task) e
 		PayloadJson: JSONBytes(payload.Data),
 	})
 	if err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
 
 	if s.Config.SMTPHost != "" {
 		go s.sendEmailNotification(user.Email, payload.Title, payload.Body)
 	}
-
-	_ = s.Queries.UpdateJobStatus(ctx, dbgen.UpdateJobStatusParams{
-		TaskID:       mustTaskID(ctx),
-		Status:       "completed",
-		AttemptCount: int32(mustRetryCount(ctx)),
-		ErrorMessage: pgtype.Text{},
-	})
 	return nil
 }
 
@@ -183,22 +167,19 @@ func (s *Server) sendEmailNotification(to string, subject string, body string) {
 }
 
 func (s *Server) handleOrphanCleanupTask(ctx context.Context, task *asynq.Task) error {
+	return s.processOrphanCleanup(ctx, mustTaskID(ctx))
+}
+
+func (s *Server) processOrphanCleanup(ctx context.Context, _ string) error {
 	orphans, err := s.Queries.ListOrphanUploads(ctx, 200)
 	if err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
 
 	for _, orphan := range orphans {
 		_ = s.Storage.DeleteObject(ctx, orphan.ObjectKey)
 		_ = s.Queries.DeleteUpload(ctx, orphan.ID)
 	}
-
-	_ = s.Queries.UpdateJobStatus(ctx, dbgen.UpdateJobStatusParams{
-		TaskID:       mustTaskID(ctx),
-		Status:       "completed",
-		AttemptCount: int32(mustRetryCount(ctx)),
-		ErrorMessage: pgtype.Text{},
-	})
 	return nil
 }
 
@@ -207,40 +188,42 @@ func (s *Server) handleAuditExportTask(ctx context.Context, task *asynq.Task) er
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return err
 	}
+	return s.processAuditExport(ctx, mustTaskID(ctx), payload)
+}
+
+func (s *Server) processAuditExport(ctx context.Context, _ string, payload jobs.AuditExportPayload) error {
 	filePath, err := s.exportAuditCSV(ctx, payload.OrgID)
 	if err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
 	defer os.Remove(filePath)
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
 	defer file.Close()
 
 	info, err := file.Stat()
 	if err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
 
 	exportKey := fmt.Sprintf("orgs/%s/exports/%s.csv", payload.OrgID, jobs.NewID())
 	if err := s.Storage.PutObject(ctx, exportKey, file, info.Size(), "text/csv"); err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
-	_ = s.Queries.UpdateJobStatus(ctx, dbgen.UpdateJobStatusParams{
-		TaskID:       mustTaskID(ctx),
-		Status:       "completed",
-		AttemptCount: int32(mustRetryCount(ctx)),
-		ErrorMessage: pgtype.Text{},
-	})
 	return nil
 }
 
 func (s *Server) handleRetentionSweepTask(ctx context.Context, task *asynq.Task) error {
+	return s.processRetentionSweep(ctx, mustTaskID(ctx))
+}
+
+func (s *Server) processRetentionSweep(ctx context.Context, _ string) error {
 	orgs, err := s.Queries.ListOrganizations(ctx)
 	if err != nil {
-		return s.failJob(ctx, task, err)
+		return err
 	}
 
 	for _, org := range orgs {
@@ -269,24 +252,7 @@ func (s *Server) handleRetentionSweepTask(ctx context.Context, task *asynq.Task)
 			_ = s.Queries.DeleteUpload(ctx, orphan.ID)
 		}
 	}
-
-	_ = s.Queries.UpdateJobStatus(ctx, dbgen.UpdateJobStatusParams{
-		TaskID:       mustTaskID(ctx),
-		Status:       "completed",
-		AttemptCount: int32(mustRetryCount(ctx)),
-		ErrorMessage: pgtype.Text{},
-	})
 	return nil
-}
-
-func (s *Server) failJob(ctx context.Context, task *asynq.Task, err error) error {
-	_ = s.Queries.UpdateJobStatus(ctx, dbgen.UpdateJobStatusParams{
-		TaskID:       mustTaskID(ctx),
-		Status:       "failed",
-		AttemptCount: int32(mustRetryCount(ctx)),
-		ErrorMessage: pgtype.Text{String: err.Error(), Valid: true},
-	})
-	return err
 }
 
 func mustTaskID(ctx context.Context) string {
@@ -319,5 +285,28 @@ func extractPDFText(data []byte) (string, error) {
 		sb.WriteString(text)
 		sb.WriteString("\n")
 	}
-	return strings.TrimSpace(sb.String()), nil
+	return fixPDFSpacing(strings.TrimSpace(sb.String())), nil
+}
+
+var (
+	mergedLowerUpper = regexp.MustCompile(`([a-z])([A-Z])`)
+	mergedWordNumber = regexp.MustCompile(`([a-zA-Z])(\d)`)
+	mergedNumberWord = regexp.MustCompile(`(\d)([a-zA-Z])`)
+	multipleSpaces   = regexp.MustCompile(`[ \t]{2,}`)
+)
+
+func fixPDFSpacing(text string) string {
+	text = mergedLowerUpper.ReplaceAllString(text, "$1 $2")
+	text = mergedWordNumber.ReplaceAllString(text, "$1 $2")
+	text = mergedNumberWord.ReplaceAllString(text, "$1 $2")
+	text = multipleSpaces.ReplaceAllString(text, " ")
+	lines := strings.Split(text, "\n")
+	var out []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }

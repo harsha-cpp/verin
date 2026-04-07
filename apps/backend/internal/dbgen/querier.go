@@ -12,26 +12,39 @@ import (
 
 type Querier interface {
 	AddCollectionMember(ctx context.Context, arg AddCollectionMemberParams) error
+	AddRolePermission(ctx context.Context, arg AddRolePermissionParams) error
 	AddUserRole(ctx context.Context, arg AddUserRoleParams) error
 	ArchiveDocument(ctx context.Context, id pgtype.UUID) error
 	ArchiveExpiredDocuments(ctx context.Context, arg ArchiveExpiredDocumentsParams) error
 	AttachTag(ctx context.Context, arg AttachTagParams) error
+	ClaimTeamInvite(ctx context.Context, code string) (TeamInvite, error)
+	ClearOrgUsers(ctx context.Context, orgID pgtype.UUID) error
 	CompleteUpload(ctx context.Context, arg CompleteUploadParams) error
 	CountAccessibleDocuments(ctx context.Context, arg CountAccessibleDocumentsParams) (int64, error)
 	CreateCollection(ctx context.Context, arg CreateCollectionParams) (Collection, error)
 	CreateComment(ctx context.Context, arg CreateCommentParams) (Comment, error)
+	CreateDefaultQuota(ctx context.Context, orgID pgtype.UUID) (Quota, error)
 	CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error)
 	CreateDocumentVersion(ctx context.Context, arg CreateDocumentVersionParams) (DocumentVersion, error)
+	CreateGoogleUser(ctx context.Context, arg CreateGoogleUserParams) (User, error)
 	CreateJob(ctx context.Context, arg CreateJobParams) (OcrJob, error)
 	CreateNotification(ctx context.Context, arg CreateNotificationParams) (Notification, error)
+	CreateOrganization(ctx context.Context, arg CreateOrganizationParams) (Organization, error)
+	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateSavedSearch(ctx context.Context, arg CreateSavedSearchParams) (SavedSearch, error)
+	CreateTeamInvite(ctx context.Context, arg CreateTeamInviteParams) (TeamInvite, error)
 	CreateUpload(ctx context.Context, arg CreateUploadParams) (Upload, error)
 	DeleteCollection(ctx context.Context, id pgtype.UUID) error
 	DeleteDocumentTags(ctx context.Context, documentID pgtype.UUID) error
+	DeleteInvitesByOrg(ctx context.Context, orgID pgtype.UUID) error
 	DeleteMetadataForDocument(ctx context.Context, documentID pgtype.UUID) error
+	DeleteOrganization(ctx context.Context, id pgtype.UUID) error
+	DeleteQuotasByOrg(ctx context.Context, orgID pgtype.UUID) error
+	DeleteRolesByOrg(ctx context.Context, orgID pgtype.UUID) error
 	DeleteSavedSearch(ctx context.Context, arg DeleteSavedSearchParams) error
 	DeleteUpload(ctx context.Context, id pgtype.UUID) error
 	DeleteUserRolesByUserID(ctx context.Context, userID pgtype.UUID) error
+	EnsureGlobalPermissions(ctx context.Context) error
 	GetCollectionByID(ctx context.Context, id pgtype.UUID) (Collection, error)
 	GetDocumentByID(ctx context.Context, id pgtype.UUID) (Document, error)
 	GetDocumentByVersionID(ctx context.Context, id pgtype.UUID) (Document, error)
@@ -39,9 +52,14 @@ type Querier interface {
 	GetJobByID(ctx context.Context, id pgtype.UUID) (OcrJob, error)
 	GetLatestVersionNumber(ctx context.Context, documentID pgtype.UUID) (int32, error)
 	GetOCRTextByVersionID(ctx context.Context, documentVersionID pgtype.UUID) (OcrText, error)
+	GetOrganizationByID(ctx context.Context, id pgtype.UUID) (Organization, error)
+	GetPermissionByKey(ctx context.Context, key string) (Permission, error)
+	GetRoleByOrgAndKey(ctx context.Context, arg GetRoleByOrgAndKeyParams) (Role, error)
+	GetTeamInviteByCode(ctx context.Context, code string) (TeamInvite, error)
 	GetUploadByID(ctx context.Context, id pgtype.UUID) (Upload, error)
 	GetUsageSummary(ctx context.Context, orgID pgtype.UUID) (GetUsageSummaryRow, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	GetUserByGoogleID(ctx context.Context, googleID pgtype.Text) (User, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	IncrementFailedLoginAttempts(ctx context.Context, id pgtype.UUID) error
 	InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) (AuditEvent, error)
@@ -49,6 +67,7 @@ type Querier interface {
 	InsertMetadata(ctx context.Context, arg InsertMetadataParams) error
 	IsCollectionMember(ctx context.Context, arg IsCollectionMemberParams) (bool, error)
 	ListAccessibleDocuments(ctx context.Context, arg ListAccessibleDocumentsParams) ([]ListAccessibleDocumentsRow, error)
+	ListAllPermissions(ctx context.Context) ([]Permission, error)
 	ListAuditEvents(ctx context.Context, arg ListAuditEventsParams) ([]AuditEvent, error)
 	ListAuditEventsFiltered(ctx context.Context, arg ListAuditEventsFilteredParams) ([]AuditEvent, error)
 	ListCollectionMembers(ctx context.Context, collectionID pgtype.UUID) ([]ListCollectionMembersRow, error)
@@ -71,11 +90,13 @@ type Querier interface {
 	ListSharedDocuments(ctx context.Context, arg ListSharedDocumentsParams) ([]ListSharedDocumentsRow, error)
 	ListSystemSettings(ctx context.Context, orgID pgtype.UUID) ([]SystemSetting, error)
 	ListTagsByDocumentID(ctx context.Context, documentID pgtype.UUID) ([]Tag, error)
+	ListTeamMembers(ctx context.Context, orgID pgtype.UUID) ([]ListTeamMembersRow, error)
 	ListUserRoles(ctx context.Context, userID pgtype.UUID) ([]Role, error)
 	ListUsers(ctx context.Context, orgID pgtype.UUID) ([]ListUsersRow, error)
 	LockUserAccount(ctx context.Context, arg LockUserAccountParams) error
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) error
 	RemoveCollectionMember(ctx context.Context, arg RemoveCollectionMemberParams) error
+	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
 	ResetFailedLoginAttempts(ctx context.Context, id pgtype.UUID) error
 	RestoreDocument(ctx context.Context, id pgtype.UUID) error
 	RevokeDocumentShare(ctx context.Context, arg RevokeDocumentShareParams) error
@@ -83,11 +104,14 @@ type Querier interface {
 	SearchDocumentsWithFilters(ctx context.Context, arg SearchDocumentsWithFiltersParams) ([]SearchDocumentsWithFiltersRow, error)
 	SetDocumentCurrentVersion(ctx context.Context, arg SetDocumentCurrentVersionParams) error
 	SetDocumentStatus(ctx context.Context, arg SetDocumentStatusParams) error
+	SetUserOrg(ctx context.Context, arg SetUserOrgParams) error
 	ShareDocument(ctx context.Context, arg ShareDocumentParams) error
 	SoftDeleteDocument(ctx context.Context, id pgtype.UUID) error
 	UpdateCollection(ctx context.Context, arg UpdateCollectionParams) (Collection, error)
 	UpdateDocumentCore(ctx context.Context, arg UpdateDocumentCoreParams) (Document, error)
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error
+	UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) error
+	UpdateOrganization(ctx context.Context, arg UpdateOrganizationParams) (Organization, error)
 	UpdateUserLastLogin(ctx context.Context, id pgtype.UUID) error
 	UpdateUserMFA(ctx context.Context, arg UpdateUserMFAParams) error
 	UpsertOCRText(ctx context.Context, arg UpsertOCRTextParams) (OcrText, error)

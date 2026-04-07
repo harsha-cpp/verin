@@ -10,10 +10,10 @@ CREATE TABLE organizations (
 
 CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  org_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
   email TEXT NOT NULL UNIQUE,
   full_name TEXT NOT NULL,
-  password_hash TEXT NOT NULL,
+  password_hash TEXT NOT NULL DEFAULT '',
   mfa_enabled BOOLEAN NOT NULL DEFAULT false,
   mfa_secret_encrypted BYTEA,
   status TEXT NOT NULL DEFAULT 'active',
@@ -21,7 +21,9 @@ CREATE TABLE users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_login_at TIMESTAMPTZ,
   failed_login_attempts INTEGER NOT NULL DEFAULT 0,
-  locked_until TIMESTAMPTZ
+  locked_until TIMESTAMPTZ,
+  google_id TEXT UNIQUE,
+  avatar_url TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE roles (
@@ -306,3 +308,17 @@ CREATE INDEX idx_audit_events_org_created ON audit_events (org_id, created_at DE
 CREATE INDEX idx_audit_events_resource ON audit_events (resource_type, resource_id);
 CREATE INDEX idx_quotas_org_id ON quotas (org_id);
 CREATE INDEX idx_retention_policies_org ON retention_policies (org_id);
+
+CREATE TABLE team_invites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  code TEXT NOT NULL UNIQUE,
+  created_by UUID NOT NULL REFERENCES users(id),
+  expires_at TIMESTAMPTZ NOT NULL,
+  max_uses INTEGER NOT NULL DEFAULT 0,
+  use_count INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_team_invites_code ON team_invites (code);
+CREATE INDEX idx_team_invites_org_id ON team_invites (org_id);

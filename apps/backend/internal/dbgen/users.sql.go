@@ -38,7 +38,7 @@ func (q *Queries) DeleteUserRolesByUserID(ctx context.Context, userID pgtype.UUI
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, org_id, email, full_name, password_hash, mfa_enabled, mfa_secret_encrypted, status, created_at, updated_at, last_login_at, failed_login_attempts, locked_until FROM users
+SELECT id, org_id, email, full_name, password_hash, mfa_enabled, mfa_secret_encrypted, status, created_at, updated_at, last_login_at, failed_login_attempts, locked_until, google_id, avatar_url FROM users
 WHERE email = $1
 `
 
@@ -59,12 +59,14 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.LastLoginAt,
 		&i.FailedLoginAttempts,
 		&i.LockedUntil,
+		&i.GoogleID,
+		&i.AvatarUrl,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, org_id, email, full_name, password_hash, mfa_enabled, mfa_secret_encrypted, status, created_at, updated_at, last_login_at, failed_login_attempts, locked_until FROM users
+SELECT id, org_id, email, full_name, password_hash, mfa_enabled, mfa_secret_encrypted, status, created_at, updated_at, last_login_at, failed_login_attempts, locked_until, google_id, avatar_url FROM users
 WHERE id = $1
 `
 
@@ -85,6 +87,8 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.LastLoginAt,
 		&i.FailedLoginAttempts,
 		&i.LockedUntil,
+		&i.GoogleID,
+		&i.AvatarUrl,
 	)
 	return i, err
 }

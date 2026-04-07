@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/verin/dms/apps/backend/internal/app"
@@ -42,21 +41,20 @@ func main() {
 		panic(err)
 	}
 	storageClient, err := storage.New(storage.Config{
-		Endpoint: endpoint,
-		AccessKey: cfg.S3AccessKey,
-		SecretKey: cfg.S3SecretKey,
-		UseSSL: useSSL,
+		Endpoint:     endpoint,
+		AccessKey:    cfg.S3AccessKey,
+		SecretKey:    cfg.S3SecretKey,
+		UseSSL:       useSSL,
 		UsePathStyle: cfg.S3UsePathStyle,
-		Bucket: cfg.S3Bucket,
+		Bucket:       cfg.S3Bucket,
+		Region:       cfg.S3Region,
 	})
 	if err != nil {
 		panic(err)
 	}
 
-	asynqClient := asynq.NewClient(asynq.RedisClientOpt{Addr: redisOptions.Addr, Password: redisOptions.Password, DB: redisOptions.DB})
-	defer asynqClient.Close()
-
-	server := app.NewServer(cfg, logger, pool, redisClient, storageClient, asynqClient)
+	server := app.NewServer(cfg, logger, pool, redisClient, storageClient)
+	server.StartBackgroundTasks(ctx)
 
 	httpServer := &http.Server{
 		Addr:              cfg.Addr(),

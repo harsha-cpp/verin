@@ -114,6 +114,91 @@ var allowedMIMEs = map[string]bool{
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
 }
 
+func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
+	authContext, _ := AuthFromContext(r.Context())
+
+	members, _ := s.Queries.ListTeamMembers(r.Context(), MustPGUUID(authContext.OrgID))
+
+	workspace, err := s.getWorkspaceSnapshotWithMemberCount(r.Context(), authContext.OrgID, len(members))
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "HOME_FAILED", "Could not load workspace", nil)
+		return
+	}
+
+	documents, err := s.Queries.ListAccessibleDocuments(r.Context(), dbgen.ListAccessibleDocumentsParams{
+		OrgID:       MustPGUUID(authContext.OrgID),
+		OwnerUserID: MustPGUUID(authContext.UserID),
+		Column3:     authContext.RoleIDs,
+		Column4:     authContext.IsAdmin,
+		Column5:     "",
+		Limit:       8,
+		Offset:      0,
+	})
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "HOME_FAILED", "Could not load documents", nil)
+		return
+	}
+
+	documentCount, _ := s.Queries.CountAccessibleDocuments(r.Context(), dbgen.CountAccessibleDocumentsParams{
+		OrgID:       MustPGUUID(authContext.OrgID),
+		OwnerUserID: MustPGUUID(authContext.UserID),
+		Column3:     authContext.RoleIDs,
+		Column4:     authContext.IsAdmin,
+		Column5:     "",
+	})
+	spaces, _ := s.Queries.ListCollections(r.Context(), MustPGUUID(authContext.OrgID))
+	notifications, _ := s.Queries.ListNotificationsByUserID(r.Context(), dbgen.ListNotificationsByUserIDParams{
+		UserID: MustPGUUID(authContext.UserID),
+		Limit:  6,
+	})
+
+	recentDocuments := make([]map[string]any, 0, len(documents))
+	pending := make([]map[string]any, 0)
+	for _, item := range documents {
+		presented := s.presentDocumentSummaryRow(r.Context(), item)
+		recentDocuments = append(recentDocuments, presented)
+		if item.Status == "processing" {
+			pending = append(pending, presented)
+		}
+	}
+
+	activity := make([]map[string]any, 0, len(notifications))
+	for _, item := range notifications {
+		activity = append(activity, map[string]any{
+			"id":        UUIDString(item.ID),
+			"kind":      item.Kind,
+			"title":     item.Title,
+			"body":      item.Body,
+			"createdAt": timestamp(item.CreatedAt),
+		})
+	}
+
+	teammates := make([]map[string]any, 0, len(members))
+	for _, item := range members {
+		teammates = append(teammates, map[string]any{
+			"id":        UUIDString(item.ID),
+			"fullName":  item.FullName,
+			"email":     item.Email,
+			"avatarUrl": item.AvatarUrl,
+			"role":      normalizedPrimaryRole(item.RoleKeys),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"workspace": workspace,
+		"stats": map[string]any{
+			"documentCount": documentCount,
+			"spaceCount":    len(spaces),
+			"memberCount":   len(members),
+			"pendingCount":  len(pending),
+		},
+		"recentDocuments": recentDocuments,
+		"pending":         pending,
+		"activity":        activity,
+		"teammates":       teammates,
+	})
+}
+
 func (s *Server) handleListDocuments(w http.ResponseWriter, r *http.Request) {
 	authContext, _ := AuthFromContext(r.Context())
 	limit, offset := parsePagination(r)
@@ -147,7 +232,7 @@ func (s *Server) handleListDocuments(w http.ResponseWriter, r *http.Request) {
 
 	response := make([]map[string]any, 0, len(items))
 	for _, item := range items {
-		response = append(response, presentDocumentSummaryRow(item))
+		response = append(response, s.presentDocumentSummaryRow(r.Context(), item))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -249,6 +334,7 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 	objectKey := storage.ObjectKey(authContext.OrgID, documentID, versionID, "original")
 
 	if err := s.Storage.PutObject(r.Context(), objectKey, reader, header.Size, mimeType); err != nil {
+		s.Logger.Error().Err(err).Str("key", objectKey).Str("bucket", s.Config.S3Bucket).Msg("storage put failed")
 		writeError(w, r, http.StatusInternalServerError, "UPLOAD_FAILED", "Could not store file", nil)
 		return
 	}
@@ -329,6 +415,12 @@ func (s *Server) handleDirectUpload(w http.ResponseWriter, r *http.Request) {
 	_, _ = s.enqueueJob(r.Context(), jobs.TypeOCR, jobs.OCRPayload{
 		DocumentID:        documentID,
 		DocumentVersionID: versionID,
+	}, versionID)
+	_, _ = s.enqueueJob(r.Context(), jobs.TypePreview, jobs.PreviewPayload{
+		DocumentID:        documentID,
+		DocumentVersionID: versionID,
+		MimeType:          mimeType,
+		StorageKey:        objectKey,
 	}, versionID)
 
 	s.respondDocumentDetail(w, r, documentID)
@@ -464,7 +556,7 @@ func (s *Server) handleCompleteUpload(w http.ResponseWriter, r *http.Request) {
 		"uploadId": upload.ID.String(),
 	})
 
-	_, _ = s.Queue.Enqueue(r.Context(), jobs.TypeNotify, jobs.NotificationPayload{
+	_, _ = s.enqueueDetachedJob(r.Context(), jobs.TypeNotify, jobs.NotificationPayload{
 		UserID: authContext.UserID,
 		Kind:   "upload.complete",
 		Title:  "Upload accepted",
@@ -522,12 +614,14 @@ func (s *Server) respondDocumentDetail(w http.ResponseWriter, r *http.Request, d
 
 	downloadURL := ""
 	ocrStatus := "pending"
+	ocrContent := ""
 	if document.CurrentVersionID.Valid {
 		currentVersion, err := s.Queries.GetDocumentVersionByID(r.Context(), document.CurrentVersionID)
 		if err == nil {
 			downloadURL, _ = s.Storage.CreateSignedDownloadURL(r.Context(), currentVersion.StorageKey, s.Config.SignedURLTTL)
 			if ocrText, err := s.Queries.GetOCRTextByVersionID(r.Context(), currentVersion.ID); err == nil {
 				ocrStatus = ocrText.ExtractionStatus
+				ocrContent = ocrText.Content
 			}
 		}
 	}
@@ -539,6 +633,67 @@ func (s *Server) respondDocumentDetail(w http.ResponseWriter, r *http.Request, d
 		}
 	}
 
+	versionItems := make([]map[string]any, 0, len(versions))
+	for _, v := range versions {
+		versionItems = append(versionItems, map[string]any{
+			"id":            UUIDString(v.ID),
+			"versionNumber": v.VersionNumber,
+			"mimeType":      v.MimeType,
+			"sizeBytes":     v.SizeBytes,
+			"createdAt":     timestamp(v.CreatedAt),
+			"changeSummary": v.ChangeSummary,
+		})
+	}
+
+	var aiSummary string
+	var aiFindings []string
+	var aiContacts []string
+	var aiSensitive []string
+
+	versionKey := UUIDString(document.CurrentVersionID)
+
+	if ocrContent != "" && ocrStatus == "completed" && s.Config.OpenRouterAPIKey != "" {
+		if cached, ok := aiStore.get(versionKey); ok {
+			aiSummary = cached.Summary
+			aiFindings = cached.Findings
+			aiContacts = cached.Contacts
+			aiSensitive = cached.Sensitive
+			s.Logger.Info().Str("versionId", versionKey).Msg("ai cache hit")
+		} else {
+			apiKey := s.Config.OpenRouterAPIKey
+			content := ocrContent
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				ai, err := callGemini(ctx, apiKey, versionKey, content)
+				if err != nil {
+					s.Logger.Error().Err(err).Str("versionId", versionKey).Msg("ai analysis failed")
+				} else {
+					s.Logger.Info().
+						Str("versionId", versionKey).
+						Int("findings", len(ai.Findings)).
+						Msg("ai analysis cached")
+				}
+			}()
+		}
+	}
+
+	if aiSummary == "" {
+		fallback := analyzeOCRContent(ocrContent)
+		aiSummary = fallback.Summary
+		aiFindings = fallback.KeyFindings
+		aiContacts = fallback.ContactData.Emails
+	}
+	if aiFindings == nil {
+		aiFindings = []string{}
+	}
+	if aiContacts == nil {
+		aiContacts = []string{}
+	}
+	if aiSensitive == nil {
+		aiSensitive = []string{}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"document": map[string]any{
 			"id":                   UUIDString(document.ID),
@@ -547,15 +702,26 @@ func (s *Server) respondDocumentDetail(w http.ResponseWriter, r *http.Request, d
 			"mimeType":             document.MimeType,
 			"sizeBytes":            document.SizeBytes,
 			"status":               document.Status,
+			"ownerUserID":          UUIDString(document.OwnerUserID),
+			"createdAt":            timestamp(document.CreatedAt),
 			"updatedAt":            timestamp(document.UpdatedAt),
 			"currentVersionNumber": currentVersionNumber(versions),
 			"metadata":             presentMetadata(metadata),
 			"tags":                 presentTags(tags),
-			"versions":             presentVersions(versions),
+			"versions":             versionItems,
 			"comments":             presentComments(comments),
 			"downloadUrl":          downloadURL,
+			"spaceName":            collectionName,
 			"collectionName":       collectionName,
 			"ocrStatus":            ocrStatus,
+			"summary":              aiSummary,
+			"findings":             aiFindings,
+			"contacts":             aiContacts,
+			"sensitive":            aiSensitive,
+			"summaryStatus":        summaryStatusFromOCR(ocrStatus),
+			"previewStatus":        previewStatusForCurrentVersion(r.Context(), s, document.CurrentVersionID),
+			"sharedWithCount":      s.documentShareCount(r.Context(), document.ID),
+			"commentCount":         len(comments),
 		},
 	})
 }
@@ -814,7 +980,7 @@ func (s *Server) processMentions(ctx context.Context, author AuthContext, docume
 			continue
 		}
 
-		_, _ = s.Queue.Enqueue(ctx, jobs.TypeNotify, jobs.NotificationPayload{
+		_, _ = s.enqueueDetachedJob(ctx, jobs.TypeNotify, jobs.NotificationPayload{
 			UserID: UUIDString(user.ID),
 			Kind:   "comment.mention",
 			Title:  "You were mentioned in a comment",
@@ -842,7 +1008,35 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Offset:         0,
 	})
 	if err != nil {
-		writeError(w, r, http.StatusInternalServerError, "SEARCH_FAILED", "Could not search documents", nil)
+		s.Logger.Warn().Err(err).Str("query", query).Msg("fts search failed, falling back to title search")
+		docs, fallbackErr := s.Queries.ListAccessibleDocuments(r.Context(), dbgen.ListAccessibleDocumentsParams{
+			OrgID:       MustPGUUID(authContext.OrgID),
+			OwnerUserID: MustPGUUID(authContext.UserID),
+			Column3:     authContext.RoleIDs,
+			Column4:     authContext.IsAdmin,
+			Column5:     "%" + query + "%",
+			Limit:       25,
+			Offset:      0,
+		})
+		if fallbackErr != nil {
+			s.Logger.Error().Err(fallbackErr).Msg("fallback search also failed")
+			writeJSON(w, http.StatusOK, map[string]any{"items": []any{}})
+			return
+		}
+		items := make([]map[string]any, 0, len(docs))
+		for _, d := range docs {
+			items = append(items, map[string]any{
+				"documentId":       UUIDString(d.ID),
+				"title":            d.Title,
+				"originalFilename": d.OriginalFilename,
+				"status":           d.Status,
+				"snippet":          "",
+				"summary":          "",
+				"matchSource":      "title",
+				"updatedAt":        d.UpdatedAt.Time.Format(time.RFC3339),
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": items})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": presentSearchResults(results)})
@@ -994,20 +1188,13 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusForbidden, "FORBIDDEN", "Audit permission required", nil)
 		return
 	}
-	taskInfo, err := s.Queue.Enqueue(r.Context(), jobs.TypeAuditExport, jobs.AuditExportPayload{OrgID: authContext.OrgID})
+	taskInfoID, err := s.enqueueDetachedJob(r.Context(), jobs.TypeAuditExport, jobs.AuditExportPayload{OrgID: authContext.OrgID})
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "AUDIT_EXPORT_FAILED", "Could not queue audit export", nil)
 		return
 	}
-	_, _ = s.Queries.CreateJob(r.Context(), dbgen.CreateJobParams{
-		DocumentVersionID: pgtype.UUID{},
-		JobType:           jobs.TypeAuditExport,
-		TaskID:            taskInfo.ID,
-		Status:            "queued",
-		PayloadJson:       JSONBytes(map[string]any{"orgId": authContext.OrgID}),
-	})
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"jobId":  taskInfo.ID,
+		"jobId":  taskInfoID,
 		"status": "queued",
 	})
 }
@@ -1320,19 +1507,17 @@ func (s *Server) handleRetryJob(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "JOB_NOT_FOUND", "Job not found", nil)
 		return
 	}
-	info, err := s.Queue.Enqueue(r.Context(), job.JobType, decodeJSONBytes(job.PayloadJson))
+	var payload any
+	if err := json.Unmarshal(job.PayloadJson, &payload); err != nil {
+		writeError(w, r, http.StatusBadRequest, "JOB_PAYLOAD_INVALID", "Could not retry this job", nil)
+		return
+	}
+	info, err := s.taskRunner.Enqueue(r.Context(), job.JobType, payload, job.DocumentVersionID)
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "JOB_RETRY_FAILED", "Could not retry job", nil)
 		return
 	}
-	_, _ = s.Queries.CreateJob(r.Context(), dbgen.CreateJobParams{
-		DocumentVersionID: job.DocumentVersionID,
-		JobType:           job.JobType,
-		TaskID:            info.ID,
-		Status:            "queued",
-		PayloadJson:       job.PayloadJson,
-	})
-	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": info.ID, "status": "queued"})
+	writeJSON(w, http.StatusAccepted, map[string]any{"jobId": info, "status": "queued"})
 }
 
 func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
@@ -1447,7 +1632,7 @@ func (s *Server) handleShareDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetUserID, err := ToPGUUID(request.UserID)
+	targetUserID, err := s.resolveUserIdentifier(r.Context(), request.UserID)
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "INVALID_USER", "Invalid user identifier", nil)
 		return
@@ -1469,7 +1654,7 @@ func (s *Server) handleShareDocument(w http.ResponseWriter, r *http.Request) {
 		"access":     accessLevel,
 	})
 
-	_, _ = s.Queue.Enqueue(r.Context(), jobs.TypeNotify, jobs.NotificationPayload{
+	_, _ = s.enqueueDetachedJob(r.Context(), jobs.TypeNotify, jobs.NotificationPayload{
 		UserID: request.UserID,
 		Kind:   "document.shared",
 		Title:  "Document shared with you",
@@ -1505,7 +1690,7 @@ func (s *Server) handleRevokeShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetUserID, err := ToPGUUID(request.UserID)
+	targetUserID, err := s.resolveUserIdentifier(r.Context(), request.UserID)
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "INVALID_USER", "Invalid user identifier", nil)
 		return
@@ -1976,7 +2161,16 @@ func currentVersionNumber(versions []dbgen.DocumentVersion) int32 {
 	return versions[0].VersionNumber
 }
 
-func presentDocumentSummaryRow(item dbgen.ListAccessibleDocumentsRow) map[string]any {
+func (s *Server) presentDocumentSummaryRow(ctx context.Context, item dbgen.ListAccessibleDocumentsRow) map[string]any {
+	summary := ""
+	summaryStatus := "processing"
+	if item.CurrentVersionID.Valid {
+		if ocrText, err := s.Queries.GetOCRTextByVersionID(ctx, item.CurrentVersionID); err == nil {
+			summary = summarizeText(ocrText.Content)
+			summaryStatus = summaryStatusFromOCR(ocrText.ExtractionStatus)
+		}
+	}
+
 	return map[string]any{
 		"id":                   UUIDString(item.ID),
 		"title":                item.Title,
@@ -1987,6 +2181,11 @@ func presentDocumentSummaryRow(item dbgen.ListAccessibleDocumentsRow) map[string
 		"updatedAt":            timestamp(item.UpdatedAt),
 		"currentVersionNumber": int4(item.CurrentVersionNumber),
 		"previewStorageKey":    item.PreviewStorageKey,
+		"previewStatus":        previewStatusFromKey(item.PreviewStorageKey),
+		"summary":              summary,
+		"summaryStatus":        summaryStatus,
+		"sharedWithCount":      s.documentShareCount(ctx, item.ID),
+		"commentCount":         s.documentCommentCount(ctx, item.ID),
 	}
 }
 
@@ -2057,6 +2256,11 @@ func presentComments(items []dbgen.ListCommentsByDocumentIDRow) []map[string]any
 func presentSearchResults(items []dbgen.SearchDocumentsRow) []map[string]any {
 	response := make([]map[string]any, 0, len(items))
 	for _, item := range items {
+		snippet := textValue(item.Snippet)
+		matchSource := "title"
+		if strings.TrimSpace(snippet) != "" {
+			matchSource = "ocr"
+		}
 		response = append(response, map[string]any{
 			"documentId":       UUIDString(item.ID),
 			"title":            item.Title,
@@ -2064,7 +2268,9 @@ func presentSearchResults(items []dbgen.SearchDocumentsRow) []map[string]any {
 			"status":           item.Status,
 			"updatedAt":        timestamp(item.UpdatedAt),
 			"rank":             item.Rank,
-			"snippet":          item.Snippet,
+			"snippet":          snippet,
+			"summary":          summarizeText(snippet),
+			"matchSource":      matchSource,
 		})
 	}
 	return response
@@ -2073,6 +2279,11 @@ func presentSearchResults(items []dbgen.SearchDocumentsRow) []map[string]any {
 func presentFilteredSearchResults(items []dbgen.SearchDocumentsWithFiltersRow) []map[string]any {
 	response := make([]map[string]any, 0, len(items))
 	for _, item := range items {
+		snippet := textValue(item.Snippet)
+		matchSource := "title"
+		if strings.TrimSpace(snippet) != "" {
+			matchSource = "ocr"
+		}
 		response = append(response, map[string]any{
 			"documentId":       UUIDString(item.ID),
 			"title":            item.Title,
@@ -2081,10 +2292,179 @@ func presentFilteredSearchResults(items []dbgen.SearchDocumentsWithFiltersRow) [
 			"mimeType":         item.MimeType,
 			"updatedAt":        timestamp(item.UpdatedAt),
 			"rank":             item.Rank,
-			"snippet":          item.Snippet,
+			"snippet":          snippet,
+			"summary":          summarizeText(snippet),
+			"matchSource":      matchSource,
 		})
 	}
 	return response
+}
+
+type ocrAnalysis struct {
+	Summary     string   `json:"summary"`
+	KeyFindings []string `json:"keyFindings"`
+	ContactData struct {
+		Emails []string `json:"emails"`
+		Phones []string `json:"phones"`
+		URLs   []string `json:"urls"`
+	} `json:"contactData"`
+}
+
+func analyzeOCRContent(content string) ocrAnalysis {
+	var result ocrAnalysis
+	result.KeyFindings = []string{}
+	result.ContactData.Emails = []string{}
+	result.ContactData.Phones = []string{}
+	result.ContactData.URLs = []string{}
+
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return result
+	}
+
+	normalized := strings.Join(strings.Fields(trimmed), " ")
+
+	sentences := splitSentences(normalized)
+
+	if len(sentences) > 0 {
+		var summaryParts []string
+		for _, s := range sentences {
+			s = strings.TrimSpace(s)
+			if len(s) >= 30 {
+				summaryParts = append(summaryParts, s)
+				if len(summaryParts) == 3 {
+					break
+				}
+			}
+		}
+		result.Summary = strings.Join(summaryParts, ". ")
+		if result.Summary != "" && !strings.HasSuffix(result.Summary, ".") {
+			result.Summary += "."
+		}
+		if len(result.Summary) > 400 {
+			result.Summary = result.Summary[:400] + "..."
+		}
+	}
+
+	keywordPatterns := []string{
+		"total", "amount", "date", "deadline", "require", "must", "shall",
+		"agreement", "contract", "payment", "due", "signed", "effective",
+		"result", "finding", "conclusion", "recommend", "important",
+		"$", "€", "£", "%",
+	}
+	seen := map[string]bool{}
+	for _, s := range sentences {
+		sl := strings.ToLower(s)
+		for _, kw := range keywordPatterns {
+			if strings.Contains(sl, kw) && len(s) >= 20 && len(s) <= 200 && !seen[s] {
+				result.KeyFindings = append(result.KeyFindings, strings.TrimSpace(s))
+				seen[s] = true
+				break
+			}
+		}
+		if len(result.KeyFindings) == 5 {
+			break
+		}
+	}
+
+	emailRe := regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
+	phoneRe := regexp.MustCompile(`(?:\+?\d[\d\s\-().]{7,}\d)`)
+	urlRe := regexp.MustCompile(`https?://[^\s"'<>]+`)
+
+	emails := emailRe.FindAllString(normalized, 10)
+	for _, e := range emails {
+		result.ContactData.Emails = append(result.ContactData.Emails, e)
+	}
+	phones := phoneRe.FindAllString(normalized, 10)
+	for _, p := range phones {
+		p = strings.TrimSpace(p)
+		if len(p) >= 7 {
+			result.ContactData.Phones = append(result.ContactData.Phones, p)
+		}
+	}
+	urls := urlRe.FindAllString(normalized, 10)
+	for _, u := range urls {
+		result.ContactData.URLs = append(result.ContactData.URLs, u)
+	}
+
+	return result
+}
+
+func splitSentences(text string) []string {
+	var sentences []string
+	var current strings.Builder
+	runes := []rune(text)
+	for i, r := range runes {
+		current.WriteRune(r)
+		if r == '.' || r == '!' || r == '?' {
+			next := i + 1
+			if next < len(runes) && runes[next] == ' ' {
+				s := strings.TrimSpace(current.String())
+				if s != "" {
+					sentences = append(sentences, s)
+				}
+				current.Reset()
+			}
+		}
+	}
+	if current.Len() > 0 {
+		s := strings.TrimSpace(current.String())
+		if s != "" {
+			sentences = append(sentences, s)
+		}
+	}
+	return sentences
+}
+
+func summarizeText(content string) string {
+	return analyzeOCRContent(content).Summary
+}
+
+func previewStatusFromKey(storageKey string) string {
+	if strings.TrimSpace(storageKey) == "" {
+		return "processing"
+	}
+	return "ready"
+}
+
+func summaryStatusFromOCR(status string) string {
+	if strings.TrimSpace(status) == "" || status == "pending" {
+		return "processing"
+	}
+	return status
+}
+
+func previewStatusForCurrentVersion(ctx context.Context, s *Server, versionID pgtype.UUID) string {
+	if !versionID.Valid {
+		return "processing"
+	}
+	assets, err := s.Queries.ListPreviewAssetsByVersionID(ctx, versionID)
+	if err != nil || len(assets) == 0 {
+		return "processing"
+	}
+	return "ready"
+}
+
+func (s *Server) documentShareCount(ctx context.Context, documentID pgtype.UUID) int {
+	permissions, err := s.Queries.ListDocumentPermissions(ctx, documentID)
+	if err != nil {
+		return 0
+	}
+	total := 0
+	for _, permission := range permissions {
+		if permission.Allow && permission.SubjectType == "user" {
+			total++
+		}
+	}
+	return total
+}
+
+func (s *Server) documentCommentCount(ctx context.Context, documentID pgtype.UUID) int {
+	comments, err := s.Queries.ListCommentsByDocumentID(ctx, documentID)
+	if err != nil {
+		return 0
+	}
+	return len(comments)
 }
 
 func decodeJSONBytes(value []byte) map[string]any {
@@ -2121,6 +2501,29 @@ func int4(value pgtype.Int4) any {
 		return nil
 	}
 	return value.Int32
+}
+
+func textValue(value any) string {
+	switch cast := value.(type) {
+	case string:
+		return cast
+	case []byte:
+		return string(cast)
+	default:
+		return ""
+	}
+}
+
+func (s *Server) resolveUserIdentifier(ctx context.Context, value string) (pgtype.UUID, error) {
+	if parsed, err := ToPGUUID(value); err == nil {
+		return parsed, nil
+	}
+
+	user, err := s.Queries.GetUserByEmail(ctx, strings.TrimSpace(value))
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	return user.ID, nil
 }
 
 func text(value pgtype.Text) string {

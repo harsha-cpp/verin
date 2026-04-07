@@ -2,15 +2,14 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httprate"
-	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
@@ -18,20 +17,20 @@ import (
 	"github.com/verin/dms/apps/backend/internal/auth"
 	"github.com/verin/dms/apps/backend/internal/config"
 	"github.com/verin/dms/apps/backend/internal/dbgen"
-	"github.com/verin/dms/apps/backend/internal/jobs"
 	"github.com/verin/dms/apps/backend/internal/storage"
 )
 
 type Server struct {
-	Config      config.Config
-	Logger      zerolog.Logger
-	DB          *pgxpool.Pool
-	Queries     *dbgen.Queries
-	Redis       *redis.Client
-	Storage     storage.Client
-	Sessions    *auth.SessionStore
-	Queue       *jobs.Queue
-	AsynqClient *asynq.Client
+	Config       config.Config
+	Logger       zerolog.Logger
+	DB           *pgxpool.Pool
+	Queries      *dbgen.Queries
+	Redis        *redis.Client
+	Storage      storage.Client
+	Sessions     *auth.SessionStore
+	sessionCache *MemCache[AuthContext]
+	workspaceCache *MemCache[WorkspaceSnapshot]
+	taskRunner   *TaskRunner
 }
 
 func NewServer(
@@ -40,19 +39,27 @@ func NewServer(
 	db *pgxpool.Pool,
 	redisClient *redis.Client,
 	storageClient storage.Client,
-	asynqClient *asynq.Client,
 ) *Server {
-	return &Server{
-		Config:      cfg,
-		Logger:      logger,
-		DB:          db,
-		Queries:     dbgen.New(db),
-		Redis:       redisClient,
-		Storage:     storageClient,
-		Sessions:    auth.NewSessionStore(redisClient),
-		Queue:       jobs.New(asynqClient),
-		AsynqClient: asynqClient,
+	server := &Server{
+		Config:       cfg,
+		Logger:       logger,
+		DB:           db,
+		Queries:      dbgen.New(db),
+		Redis:        redisClient,
+		Storage:      storageClient,
+		Sessions:     auth.NewSessionStore(redisClient),
+		sessionCache: NewMemCache[AuthContext](30 * time.Second),
+		workspaceCache: NewMemCache[WorkspaceSnapshot](30 * time.Second),
 	}
+	server.taskRunner = NewTaskRunner(server, 4)
+	return server
+}
+
+func (s *Server) StartBackgroundTasks(ctx context.Context) {
+	if s.taskRunner == nil {
+		return
+	}
+	s.taskRunner.ResumePending(ctx)
 }
 
 func (s *Server) Router() http.Handler {
@@ -63,7 +70,7 @@ func (s *Server) Router() http.Handler {
 	router.Use(httprate.LimitByRealIP(120, 1))
 	router.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{s.Config.WebOrigin},
-		AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		AllowCredentials: true,
 	}))
@@ -77,76 +84,68 @@ func (s *Server) Router() http.Handler {
 
 	router.Route("/api/v1", func(r chi.Router) {
 		r.Route("/auth", func(ar chi.Router) {
-			ar.Post("/login", s.handleLogin)
+			ar.Get("/google", s.handleGoogleRedirect)
+			ar.Get("/google/callback", s.handleGoogleCallback)
 			ar.Post("/logout", s.handleLogout)
 			ar.Get("/me", s.handleMe)
-			ar.Post("/mfa/setup", s.requireAuth(s.handleMFASetup))
-			ar.Post("/mfa/verify", s.handleMFAVerify)
 		})
 
-		r.Group(func(protected chi.Router) {
-			protected.Use(s.requireAuthenticated)
+		r.Group(func(authed chi.Router) {
+			authed.Use(s.requireAuthenticated)
 
-			protected.Route("/documents", func(dr chi.Router) {
-				dr.Get("/", s.handleListDocuments)
-				dr.Post("/upload", s.handleDirectUpload)
-				dr.Post("/init-upload", s.handleInitUpload)
-				dr.Post("/complete-upload", s.handleCompleteUpload)
-				dr.Get("/{documentID}", s.handleGetDocument)
-				dr.Patch("/{documentID}", s.handleUpdateDocument)
-				dr.Delete("/{documentID}", s.handleDeleteDocument)
-				dr.Post("/{documentID}/archive", s.handleArchiveDocument)
-				dr.Post("/{documentID}/restore", s.handleRestoreDocument)
-				dr.Post("/{documentID}/download", s.handleSignedDownload)
-				dr.Get("/{documentID}/versions", s.handleListVersions)
-				dr.Post("/{documentID}/versions/{versionID}/restore", s.handleRestoreVersion)
-				dr.Route("/{documentID}/comments", func(cr chi.Router) {
-					cr.Get("/", s.handleListComments)
-					cr.Post("/", s.handleCreateComment)
+			authed.Get("/home", s.handleHome)
+			authed.Post("/teams", s.handleCreateTeam)
+			authed.Post("/teams/join", s.handleJoinTeam)
+
+			authed.Group(func(protected chi.Router) {
+				protected.Use(s.requireTeam)
+
+				protected.Post("/teams/invite", s.handleCreateInvite)
+				protected.Get("/teams/members", s.handleListMembers)
+				protected.Get("/teams/info", s.handleGetTeamInfo)
+				protected.Put("/teams", s.handleUpdateTeam)
+				protected.Delete("/teams", s.handleDeleteTeam)
+				protected.Put("/teams/members/{memberID}/role", s.handleUpdateMemberRole)
+				protected.Delete("/teams/members/{memberID}", s.handleRemoveMember)
+
+				protected.Route("/documents", func(dr chi.Router) {
+					dr.Get("/", s.handleListDocuments)
+					dr.Post("/upload", s.handleDirectUpload)
+					dr.Post("/init-upload", s.handleInitUpload)
+					dr.Post("/complete-upload", s.handleCompleteUpload)
+					dr.Get("/{documentID}", s.handleGetDocument)
+					dr.Patch("/{documentID}", s.handleUpdateDocument)
+					dr.Delete("/{documentID}", s.handleDeleteDocument)
+					dr.Post("/{documentID}/archive", s.handleArchiveDocument)
+					dr.Post("/{documentID}/restore", s.handleRestoreDocument)
+					dr.Post("/{documentID}/download", s.handleSignedDownload)
+					dr.Get("/{documentID}/versions", s.handleListVersions)
+					dr.Post("/{documentID}/versions/{versionID}/restore", s.handleRestoreVersion)
+					dr.Route("/{documentID}/comments", func(cr chi.Router) {
+						cr.Get("/", s.handleListComments)
+						cr.Post("/", s.handleCreateComment)
+					})
+					dr.Post("/{documentID}/share", s.handleShareDocument)
+					dr.Delete("/{documentID}/share", s.handleRevokeShare)
 				})
-				dr.Post("/{documentID}/share", s.handleShareDocument)
-				dr.Delete("/{documentID}/share", s.handleRevokeShare)
-			})
 
-			protected.Get("/shared", s.handleListSharedDocuments)
+				protected.Get("/shared", s.handleListSharedDocuments)
 
-			protected.Route("/collections", func(cr chi.Router) {
-				cr.Get("/", s.handleListCollections)
-				cr.Post("/", s.handleCreateCollection)
-				cr.Get("/{collectionID}", s.handleGetCollection)
-				cr.Patch("/{collectionID}", s.handleUpdateCollection)
-				cr.Delete("/{collectionID}", s.handleDeleteCollection)
-				cr.Get("/{collectionID}/documents", s.handleListCollectionDocuments)
-				cr.Post("/{collectionID}/members", s.handleAddCollectionMember)
-				cr.Delete("/{collectionID}/members/{userID}", s.handleRemoveCollectionMember)
-			})
+				protected.Route("/spaces", func(cr chi.Router) {
+					cr.Get("/", s.handleListCollections)
+					cr.Post("/", s.handleCreateCollection)
+					cr.Get("/{collectionID}", s.handleGetCollection)
+					cr.Patch("/{collectionID}", s.handleUpdateCollection)
+					cr.Delete("/{collectionID}", s.handleDeleteCollection)
+					cr.Get("/{collectionID}/documents", s.handleListCollectionDocuments)
+					cr.Post("/{collectionID}/members", s.handleAddCollectionMember)
+					cr.Delete("/{collectionID}/members/{userID}", s.handleRemoveCollectionMember)
+				})
 
-			protected.Get("/search", s.handleSearch)
-			protected.Post("/search/advanced", s.handleAdvancedSearch)
-			protected.Get("/search/saved", s.handleListSavedSearches)
-			protected.Post("/search/saved", s.handleCreateSavedSearch)
+				protected.Get("/search", s.handleSearch)
 
-			protected.Get("/audit/events", s.handleListAuditEvents)
-			protected.Post("/audit/reports/export", s.handleAuditExport)
-
-			protected.Get("/notifications", s.handleListNotifications)
-			protected.Post("/notifications/{notificationID}/read", s.handleMarkNotificationRead)
-
-			protected.Route("/admin", func(admin chi.Router) {
-				admin.Use(s.requireAdmin)
-				admin.Get("/users", s.handleListUsers)
-				admin.Post("/users/{userID}/roles", s.handleAssignRoles)
-				admin.Get("/roles", s.handleListRoles)
-				admin.Get("/quotas", s.handleListQuotas)
-				admin.Post("/quotas", s.handleUpsertQuota)
-				admin.Get("/retention", s.handleListRetentionPolicies)
-				admin.Post("/retention", s.handleUpsertRetentionPolicy)
-				admin.Get("/settings", s.handleListSettings)
-				admin.Post("/settings", s.handleUpsertSetting)
-				admin.Get("/jobs", s.handleListJobs)
-				admin.Post("/jobs/{jobID}/retry", s.handleRetryJob)
-				admin.Get("/usage", s.handleUsage)
-				admin.Get("/health", s.handleAdminHealth)
+				protected.Get("/notifications", s.handleListNotifications)
+				protected.Post("/notifications/{notificationID}/read", s.handleMarkNotificationRead)
 			})
 		})
 	})
@@ -156,12 +155,15 @@ func (s *Server) Router() http.Handler {
 
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		next.ServeHTTP(w, r)
+		dur := time.Since(start)
 		s.Logger.Info().
 			Str("method", r.Method).
 			Str("path", r.URL.Path).
+			Dur("latency", dur).
 			Str("request_id", middleware.GetReqID(r.Context())).
 			Msg("http request")
-		next.ServeHTTP(w, r)
 	})
 }
 
@@ -220,23 +222,25 @@ func (s *Server) requireAdmin(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) enqueueJob(ctx context.Context, jobType string, payload any, versionID string) (string, error) {
-	info, err := s.Queue.Enqueue(ctx, jobType, payload)
-	if err != nil {
-		return "", err
-	}
-
-	versionUUID := MustPGUUID(versionID)
-	_, err = s.Queries.CreateJob(ctx, dbgen.CreateJobParams{
-		DocumentVersionID: versionUUID,
-		JobType:           jobType,
-		TaskID:            info.ID,
-		Status:            "queued",
-		PayloadJson:       JSONBytes(payload),
+func (s *Server) requireTeam(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authContext, ok := AuthFromContext(r.Context())
+		if !ok || authContext.OrgID == "" {
+			writeError(w, r, http.StatusForbidden, "TEAM_REQUIRED", "You must join or create a team first", nil)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
-	if err != nil {
-		return "", fmt.Errorf("create job row: %w", err)
-	}
+}
 
-	return info.ID, nil
+func (s *Server) enqueueJob(ctx context.Context, jobType string, payload any, versionID string) (string, error) {
+	var versionUUID any
+	if strings.TrimSpace(versionID) != "" {
+		versionUUID = MustPGUUID(versionID)
+	}
+	return s.taskRunner.Enqueue(ctx, jobType, payload, versionUUID)
+}
+
+func (s *Server) enqueueDetachedJob(ctx context.Context, jobType string, payload any) (string, error) {
+	return s.taskRunner.Enqueue(ctx, jobType, payload, nil)
 }

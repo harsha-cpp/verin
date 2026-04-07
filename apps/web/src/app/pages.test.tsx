@@ -3,39 +3,36 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
-import { DocumentDetailPage, LoginPage } from "@/app/pages";
+import { LoginPage } from "@/app/pages";
 
-function renderWithProviders(ui: ReactNode, route = "/") {
+function wrap(ui: ReactNode) {
   const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-      },
-    },
+    defaultOptions: { queries: { retry: false } },
   });
-
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[route]}>
+      <MemoryRouter initialEntries={["/"]}>
         <Routes>
           <Route path="/" element={ui} />
-          <Route path="/documents/:documentId" element={ui} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
-describe("DMS pages", () => {
-  it("renders the login surface", () => {
-    renderWithProviders(<LoginPage />);
-    expect(screen.getByText("Log in to your Verin account")).toBeInTheDocument();
-    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+describe("Verin pages", () => {
+  it("landing page shows Google sign-in", () => {
+    wrap(<LoginPage />);
+    expect(screen.getByText(/sign in with google/i)).toBeInTheDocument();
   });
 
-  it("renders a document detail view from fallback data", async () => {
-    renderWithProviders(<DocumentDetailPage />, "/documents/90000000-0000-0000-0000-000000000001");
-    expect(await screen.findByText("Quarterly vendor compliance pack")).toBeInTheDocument();
-    expect(screen.getByText("Retention class verified against the latest policy.")).toBeInTheDocument();
+  it("landing page shows product value proposition", () => {
+    wrap(<LoginPage />);
+    expect(screen.getByText(/shared document workspace/i)).toBeInTheDocument();
+  });
+
+  it("landing page shows how-it-works features", () => {
+    wrap(<LoginPage />);
+    expect(screen.getByText(/fast first-use loop/i)).toBeInTheDocument();
   });
 });

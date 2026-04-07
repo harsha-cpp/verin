@@ -2,15 +2,24 @@
 @source "../../../../packages/ui/src";
 
 :root {
-  --background: #f9fafb;
+  --bg: #faf8f5;
+  --ink: #1c1c1e;
+  --ink-soft: #4a5048;
+  --ink-muted: #8a938f;
   --surface: #ffffff;
-  --foreground: #111827;
-  --muted-foreground: #6b7280;
-  --border: #e5e7eb;
-  --ring: #3b82f6;
+  --surface-soft: #f3efe9;
+  --line: #e6e2da;
+  --line-strong: #d0ccc4;
+  --accent: #527058;
+  --accent-strong: #3d5643;
+  --accent-soft: #eaf2ec;
+  --background: #faf8f5;
+  --foreground: #1c1c1e;
+  --border: #e6e2da;
+
   font-family: "Geist Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: var(--foreground);
-  background: var(--background);
+  color: var(--ink);
+  background: var(--bg);
 }
 
 html {
@@ -19,8 +28,8 @@ html {
 
 body {
   min-height: 100vh;
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--bg);
+  color: var(--ink);
 }
 
 #root {
@@ -28,7 +37,13 @@ body {
 }
 
 * {
-  border-color: var(--border);
+  border-color: var(--line);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
 }
 
 body,
@@ -39,22 +54,61 @@ textarea {
   font-family: inherit;
 }
 
+.font-display {
+  font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  font-variation-settings: "wght" 720;
+  font-weight: 700;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.animate-rise     { animation: rise     0.5s cubic-bezier(0.22, 1, 0.36, 1) both; opacity: 0; }
+.animate-fade-in  { animation: fade-in  0.3s ease both; }
+.animate-slide-up { animation: slide-up 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+.delay-50  { animation-delay: 50ms;  }
+.delay-100 { animation-delay: 100ms; }
+.delay-150 { animation-delay: 150ms; }
+.delay-200 { animation-delay: 200ms; }
+.delay-300 { animation-delay: 300ms; }
+.delay-400 { animation-delay: 400ms; }
+.delay-500 { animation-delay: 500ms; }
+
+@keyframes processing-ring {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50%       { opacity: 0.7; transform: scale(1.12); }
+}
+
+.processing-pulse {
+  animation: processing-ring 2s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position:  200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--line) 25%, var(--surface-soft) 50%, var(--line) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease infinite;
+  border-radius: 8px;
+}
+
 ::selection {
-  background: rgba(59, 130, 246, 0.15);
-  color: var(--foreground);
-}
-
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #d1d5db;
-  border: 2px solid var(--background);
-  border-radius: 999px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(82, 112, 88, 0.15);
+  color: var(--ink);
 }

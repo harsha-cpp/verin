@@ -233,6 +233,17 @@ type Tag struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type TeamInvite struct {
+	ID        pgtype.UUID        `json:"id"`
+	OrgID     pgtype.UUID        `json:"org_id"`
+	Code      string             `json:"code"`
+	CreatedBy pgtype.UUID        `json:"created_by"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	MaxUses   int32              `json:"max_uses"`
+	UseCount  int32              `json:"use_count"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Upload struct {
 	ID               pgtype.UUID        `json:"id"`
 	OrgID            pgtype.UUID        `json:"org_id"`
@@ -263,6 +274,8 @@ type User struct {
 	LastLoginAt         pgtype.Timestamptz `json:"last_login_at"`
 	FailedLoginAttempts int32              `json:"failed_login_attempts"`
 	LockedUntil         pgtype.Timestamptz `json:"locked_until"`
+	GoogleID            pgtype.Text        `json:"google_id"`
+	AvatarUrl           string             `json:"avatar_url"`
 }
 
 type UserRole struct {

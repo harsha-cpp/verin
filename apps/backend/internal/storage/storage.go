@@ -33,14 +33,25 @@ type Config struct {
 	UseSSL       bool
 	UsePathStyle bool
 	Bucket       string
+	Region       string
 }
 
 func New(cfg Config) (*MinIOClient, error) {
+	bucketLookup := minio.BucketLookupAuto
+	if !cfg.UsePathStyle {
+		bucketLookup = minio.BucketLookupDNS
+	}
+
+	region := cfg.Region
+	if region == "" {
+		region = "us-east-1"
+	}
+
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:        credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
 		Secure:       cfg.UseSSL,
-		Region:       "us-east-1",
-		BucketLookup: minio.BucketLookupAuto,
+		Region:       region,
+		BucketLookup: bucketLookup,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create minio client: %w", err)

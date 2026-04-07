@@ -20,6 +20,7 @@ type AuthContext struct {
 	OrgID        string
 	Email        string
 	FullName     string
+	AvatarURL    string
 	Roles        []string
 	RoleIDs      []pgtype.UUID
 	Permissions  []string

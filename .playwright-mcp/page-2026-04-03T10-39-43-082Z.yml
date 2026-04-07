@@ -1,0 +1,30 @@
+- generic [ref=e3]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - link "verin" [ref=e7] [cursor=pointer]:
+        - /url: /dashboard
+        - generic [ref=e8]: verin
+      - paragraph [ref=e10]: Document management for teams that care about compliance.
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - heading "Welcome to Verin" [level=3] [ref=e13]
+        - paragraph [ref=e14]: Sign in to access your workspace.
+      - button "Sign in with Google" [ref=e16]:
+        - img [ref=e17]
+        - text: Sign in with Google
+  - generic [ref=e22]:
+    - generic [ref=e23]:
+      - generic [ref=e24]: Verin DMS
+      - heading "Quiet control for documents that matter." [level=2] [ref=e25]
+      - paragraph [ref=e26]: Upload, search, retain, audit, and govern critical records through a workspace built for compliance-first teams.
+    - generic [ref=e27]:
+      - generic [ref=e28]:
+        - generic [ref=e29]: Full-text search
+        - generic [ref=e30]: OCR and metadata indexed together
+      - generic [ref=e31]:
+        - generic [ref=e32]: Retention policies
+        - generic [ref=e33]: Archive and deletion rules per collection
+      - generic [ref=e34]:
+        - generic [ref=e35]: Audit trail
+        - generic [ref=e36]: Every sensitive action tracked and exportable
+    - paragraph [ref=e37]: By continuing, you agree to Verin's terms and privacy notice.
