@@ -125,10 +125,46 @@ const updateTeamSchema = z.object({
 export function LandingPage() {
   const session = useSession();
   const sd = session.data as SessionData | undefined;
+  const [authMode, setAuthMode] = useState<"login" | "signup">("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   if (sd?.authenticated) {
     return <Navigate to={sd?.hasWorkspace ? "/home" : "/onboarding"} replace />;
   }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    const endpoint = authMode === "signup" ? "/api/v1/auth/signup" : "/api/v1/auth/login";
+    const body = authMode === "signup"
+      ? JSON.stringify({ email, password, fullName })
+      : JSON.stringify({ email, password });
+    try {
+      const res = await fetch(endpoint, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body });
+      const data = await res.json();
+      if (res.ok && data.redirect) {
+        window.location.href = data.redirect;
+      } else {
+        setError(data.error?.message || "Something went wrong");
+      }
+    } catch {
+      setError("Network error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDemoLogin = async () => {
+    setLoading(true);
+    const res = await fetch("/api/v1/auth/demo-login", { method: "POST", credentials: "include" });
+    if (res.ok) window.location.href = "/home";
+    setLoading(false);
+  };
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[var(--bg)] text-[var(--ink)]">
@@ -136,11 +172,8 @@ export function LandingPage() {
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8 lg:px-10">
         <header className="flex items-center justify-between">
           <Logo />
-          <Button variant="secondary" onClick={async () => {
-              const res = await fetch("/api/v1/auth/demo-login", { method: "POST", credentials: "include" });
-              if (res.ok) window.location.href = "/home";
-            }}>
-            Sign in
+          <Button variant="secondary" onClick={handleDemoLogin} disabled={loading}>
+            Demo Login
           </Button>
         </header>
 
@@ -159,17 +192,51 @@ export function LandingPage() {
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-3">
-              <Button className="h-12 px-5 gap-3" onClick={async () => {
-                const res = await fetch("/api/v1/auth/demo-login", { method: "POST", credentials: "include" });
-                if (res.ok) window.location.href = "/home";
-              }}>
-                Login with Test Credentials
-              </Button>
-              <div className="flex items-center text-sm text-[var(--ink-muted)]">
-                demo@verin.app
+            <form onSubmit={handleSubmit} className="space-y-3 max-w-sm">
+              {authMode === "signup" && (
+                <input
+                  type="text"
+                  placeholder="Full name"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-2.5 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]"
+                />
+              )}
+              <input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-2.5 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]"
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-xl border border-[var(--line)] bg-white px-4 py-2.5 text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]"
+              />
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              <div className="flex items-center gap-3">
+                <Button type="submit" className="h-10 px-5" disabled={loading}>
+                  {loading ? "..." : authMode === "signup" ? "Create account" : "Sign in"}
+                </Button>
+                <button
+                  type="button"
+                  className="text-sm text-[var(--ink-muted)] hover:text-[var(--ink)] underline"
+                  onClick={() => { setAuthMode(authMode === "login" ? "signup" : "login"); setError(null); }}
+                >
+                  {authMode === "login" ? "Create an account" : "Already have an account?"}
+                </button>
               </div>
-            </div>
+              <button
+                type="button"
+                className="text-xs text-[var(--ink-muted)] hover:text-[var(--accent)] underline"
+                onClick={handleDemoLogin}
+              >
+                Skip — login with demo account (demo@verin.app)
+              </button>
+            </form>
 
             <div id="landing-highlights" className="grid gap-3 sm:grid-cols-3">
               {[

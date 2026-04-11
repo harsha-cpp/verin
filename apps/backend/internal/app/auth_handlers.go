@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/crypto/bcrypt"
 
 	verauth "github.com/verin/dms/apps/backend/internal/auth"
 	"github.com/verin/dms/apps/backend/internal/dbgen"
@@ -268,4 +270,109 @@ func (s *Server) handleDemoLogin(w http.ResponseWriter, r *http.Request) {
 		"ok":       true,
 		"redirect": "/home",
 	})
+}
+
+func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		FullName string `json:"fullName"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "INVALID_BODY", "Invalid request", nil)
+		return
+	}
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+	req.FullName = strings.TrimSpace(req.FullName)
+
+	if req.Email == "" || req.Password == "" || req.FullName == "" {
+		writeError(w, r, http.StatusBadRequest, "MISSING_FIELDS", "Email, password, and name are required", nil)
+		return
+	}
+	if len(req.Password) < 6 {
+		writeError(w, r, http.StatusBadRequest, "WEAK_PASSWORD", "Password must be at least 6 characters", nil)
+		return
+	}
+
+	if _, err := s.Queries.GetUserByEmail(r.Context(), req.Email); err == nil {
+		writeError(w, r, http.StatusConflict, "EMAIL_TAKEN", "An account with this email already exists", nil)
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "HASH_FAILED", "Could not process password", nil)
+		return
+	}
+
+	user, err := s.Queries.CreateGoogleUser(r.Context(), dbgen.CreateGoogleUserParams{
+		Email:    req.Email,
+		FullName: req.FullName,
+		GoogleID: pgtype.Text{Valid: false},
+	})
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "CREATE_FAILED", "Could not create account", nil)
+		return
+	}
+
+	_, _ = s.DB.Exec(r.Context(), "UPDATE users SET password_hash = $1 WHERE id = $2", string(hash), user.ID)
+
+	session := verauth.Session{
+		UserID:        UUIDString(user.ID),
+		OrgID:         UUIDString(user.OrgID),
+		CSRFTok:       uuid.NewString(),
+		Authenticated: true,
+	}
+	session, err = s.Sessions.Create(r.Context(), session, s.Config.SessionTTL)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "SESSION_FAILED", "Could not create session", nil)
+		return
+	}
+
+	s.setSessionCookies(w, session)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "redirect": "/onboarding"})
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "INVALID_BODY", "Invalid request", nil)
+		return
+	}
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+
+	user, err := s.Queries.GetUserByEmail(r.Context(), req.Email)
+	if err != nil {
+		writeError(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password", nil)
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		writeError(w, r, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password", nil)
+		return
+	}
+
+	session := verauth.Session{
+		UserID:        UUIDString(user.ID),
+		OrgID:         UUIDString(user.OrgID),
+		CSRFTok:       uuid.NewString(),
+		Authenticated: true,
+	}
+	session, err = s.Sessions.Create(r.Context(), session, s.Config.SessionTTL)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "SESSION_FAILED", "Could not create session", nil)
+		return
+	}
+
+	_ = s.Queries.UpdateUserLastLogin(r.Context(), user.ID)
+	s.setSessionCookies(w, session)
+
+	redirect := "/home"
+	if !user.OrgID.Valid {
+		redirect = "/onboarding"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "redirect": redirect})
 }

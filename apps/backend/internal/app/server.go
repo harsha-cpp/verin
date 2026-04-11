@@ -87,6 +87,8 @@ func (s *Server) Router() http.Handler {
 			ar.Get("/google", s.handleGoogleRedirect)
 			ar.Get("/google/callback", s.handleGoogleCallback)
 			ar.Post("/demo-login", s.handleDemoLogin)
+			ar.Post("/signup", s.handleSignup)
+			ar.Post("/login", s.handleLogin)
 			ar.Post("/logout", s.handleLogout)
 			ar.Get("/me", s.handleMe)
 		})
