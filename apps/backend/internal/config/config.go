@@ -71,8 +71,8 @@ func Load() (Config, error) {
 		SMTPHost:           getEnv("SMTP_HOST", ""),
 		SMTPPort:           getEnv("SMTP_PORT", "1025"),
 		SMTPFromAddress:    getEnv("SMTP_FROM", "noreply@verin.local"),
-		GoogleClientID:     mustEnv("GOOGLE_CLIENT_ID"),
-		GoogleClientSecret: mustEnv("GOOGLE_CLIENT_SECRET"),
+		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
 		GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", "http://localhost:8080/api/v1/auth/google/callback"),
 		OpenRouterAPIKey:   getEnv("OPENROUTER_API_KEY", ""),
 	}
