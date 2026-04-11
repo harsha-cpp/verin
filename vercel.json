@@ -3,6 +3,8 @@
   "outputDirectory": "apps/web/dist",
   "installCommand": "pnpm install",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://RAILWAY_URL/api/$1" }
+    { "source": "/healthz", "destination": "https://verin-api.onrender.com/healthz" },
+    { "source": "/api/(.*)", "destination": "https://verin-api.onrender.com/api/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

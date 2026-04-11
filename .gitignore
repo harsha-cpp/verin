@@ -18,3 +18,4 @@ apps/backend/bin
 apps/backend/.cache
 
 infra/data
+.vercel

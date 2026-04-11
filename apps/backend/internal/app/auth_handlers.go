@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
 	verauth "github.com/verin/dms/apps/backend/internal/auth"
+	"github.com/verin/dms/apps/backend/internal/dbgen"
 )
 
 const sessionCacheTTL = 5 * time.Minute
@@ -227,5 +229,43 @@ func (s *Server) clearSessionCookies(w http.ResponseWriter) {
 		Path:    "/",
 		Expires: expired,
 		MaxAge:  -1,
+	})
+}
+
+func (s *Server) handleDemoLogin(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	email := "demo@verin.app"
+
+	user, err := s.Queries.GetUserByEmail(ctx, email)
+	if err != nil {
+		user, err = s.Queries.CreateGoogleUser(ctx, dbgen.CreateGoogleUserParams{
+			Email:    email,
+			FullName: "Demo User",
+			GoogleID: pgtype.Text{Valid: false},
+		})
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError, "SEED_FAILED", "Could not create demo user", nil)
+			return
+		}
+	}
+
+	session := verauth.Session{
+		UserID:        UUIDString(user.ID),
+		OrgID:         UUIDString(user.OrgID),
+		CSRFTok:       uuid.NewString(),
+		Authenticated: true,
+	}
+
+	session, err = s.Sessions.Create(ctx, session, s.Config.SessionTTL)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "SESSION_FAILED", "Could not create session", nil)
+		return
+	}
+
+	_ = s.Queries.UpdateUserLastLogin(ctx, user.ID)
+	s.setSessionCookies(w, session)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"redirect": "/home",
 	})
 }

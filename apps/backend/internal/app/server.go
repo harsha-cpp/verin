@@ -21,16 +21,16 @@ import (
 )
 
 type Server struct {
-	Config       config.Config
-	Logger       zerolog.Logger
-	DB           *pgxpool.Pool
-	Queries      *dbgen.Queries
-	Redis        *redis.Client
-	Storage      storage.Client
-	Sessions     *auth.SessionStore
-	sessionCache *MemCache[AuthContext]
+	Config         config.Config
+	Logger         zerolog.Logger
+	DB             *pgxpool.Pool
+	Queries        *dbgen.Queries
+	Redis          *redis.Client
+	Storage        storage.Client
+	Sessions       *auth.SessionStore
+	sessionCache   *MemCache[AuthContext]
 	workspaceCache *MemCache[WorkspaceSnapshot]
-	taskRunner   *TaskRunner
+	taskRunner     *TaskRunner
 }
 
 func NewServer(
@@ -41,14 +41,14 @@ func NewServer(
 	storageClient storage.Client,
 ) *Server {
 	server := &Server{
-		Config:       cfg,
-		Logger:       logger,
-		DB:           db,
-		Queries:      dbgen.New(db),
-		Redis:        redisClient,
-		Storage:      storageClient,
-		Sessions:     auth.NewSessionStore(redisClient),
-		sessionCache: NewMemCache[AuthContext](30 * time.Second),
+		Config:         cfg,
+		Logger:         logger,
+		DB:             db,
+		Queries:        dbgen.New(db),
+		Redis:          redisClient,
+		Storage:        storageClient,
+		Sessions:       auth.NewSessionStore(redisClient),
+		sessionCache:   NewMemCache[AuthContext](30 * time.Second),
 		workspaceCache: NewMemCache[WorkspaceSnapshot](30 * time.Second),
 	}
 	server.taskRunner = NewTaskRunner(server, 4)
@@ -86,6 +86,7 @@ func (s *Server) Router() http.Handler {
 		r.Route("/auth", func(ar chi.Router) {
 			ar.Get("/google", s.handleGoogleRedirect)
 			ar.Get("/google/callback", s.handleGoogleCallback)
+			ar.Post("/demo-login", s.handleDemoLogin)
 			ar.Post("/logout", s.handleLogout)
 			ar.Get("/me", s.handleMe)
 		})
