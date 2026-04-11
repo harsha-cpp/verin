@@ -84,6 +84,12 @@ func (r *TaskRunner) start(taskID string, jobType string, payload any) {
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
+		defer func() {
+			if rec := recover(); rec != nil {
+				r.server.Logger.Error().Interface("panic", rec).Str("task_id", taskID).Msg("task runner recovered from panic")
+				r.fail(taskID, 1, fmt.Errorf("panic: %v", rec))
+			}
+		}()
 		r.concurrency <- struct{}{}
 		defer func() { <-r.concurrency }()
 
@@ -115,8 +121,8 @@ func (r *TaskRunner) start(taskID string, jobType string, payload any) {
 func (r *TaskRunner) fail(taskID string, attemptCount int32, err error) {
 	r.server.Logger.Warn().Err(err).Str("task_id", taskID).Msg("background task failed")
 	_ = r.server.Queries.UpdateJobStatus(context.Background(), dbgen.UpdateJobStatusParams{
-		TaskID: taskID,
-		Status: "failed",
+		TaskID:       taskID,
+		Status:       "failed",
 		AttemptCount: attemptCount,
 		ErrorMessage: pgtype.Text{
 			String: strings.TrimSpace(err.Error()),
