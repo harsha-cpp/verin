@@ -1,4 +1,9 @@
 {
+  "build": {
+    "env": {
+      "VITE_API_BASE_URL": ""
+    }
+  },
   "buildCommand": "pnpm --filter @verin/web... build",
   "outputDirectory": "apps/web/dist",
   "installCommand": "pnpm install",
