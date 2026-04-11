@@ -1984,6 +1984,9 @@ func (s *Server) canAccessDocument(ctx context.Context, authContext AuthContext,
 	if authContext.IsAdmin || UUIDString(document.OwnerUserID) == authContext.UserID {
 		return true, nil
 	}
+	if authContext.OrgID != "" && UUIDString(document.OrgID) == authContext.OrgID {
+		return true, nil
+	}
 	if document.CollectionID.Valid {
 		isMember, err := s.Queries.IsCollectionMember(ctx, dbgen.IsCollectionMemberParams{
 			CollectionID: document.CollectionID,
