@@ -31,6 +31,9 @@ WHERE d.org_id = $1
     $4::boolean
     OR d.owner_user_id = $2
     OR EXISTS (
+      SELECT 1 FROM users u WHERE u.id = $2 AND u.org_id = $1
+    )
+    OR EXISTS (
       SELECT 1
       FROM collection_members cm
       WHERE cm.collection_id = d.collection_id
@@ -63,6 +66,9 @@ WHERE d.org_id = $1
   AND (
     $4::boolean
     OR d.owner_user_id = $2
+    OR EXISTS (
+      SELECT 1 FROM users u WHERE u.id = $2 AND u.org_id = $1
+    )
     OR EXISTS (
       SELECT 1
       FROM collection_members cm

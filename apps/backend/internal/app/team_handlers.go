@@ -290,6 +290,31 @@ func (s *Server) handleUpdateMemberRole(w http.ResponseWriter, r *http.Request) 
 	}
 
 	authCtx, _ := AuthFromContext(r.Context())
+
+	if !authCtx.IsAdmin {
+		writeError(w, r, http.StatusForbidden, "FORBIDDEN", "Only workspace owners can change roles", nil)
+		return
+	}
+
+	if memberID == authCtx.UserID {
+		writeError(w, r, http.StatusBadRequest, "CANNOT_CHANGE_OWN_ROLE", "You cannot change your own role", nil)
+		return
+	}
+
+	targetUser, err := s.Queries.GetUserByID(r.Context(), MustPGUUID(memberID))
+	if err != nil {
+		writeError(w, r, http.StatusNotFound, "MEMBER_NOT_FOUND", "Member not found", nil)
+		return
+	}
+
+	targetRoles, _ := s.Queries.ListUserRoles(r.Context(), targetUser.ID)
+	for _, tr := range targetRoles {
+		if tr.Key == "owner" {
+			writeError(w, r, http.StatusForbidden, "CANNOT_CHANGE_OWNER", "Owner role cannot be changed", nil)
+			return
+		}
+	}
+
 	orgID, _ := ToPGUUID(authCtx.OrgID)
 	userID, _ := ToPGUUID(memberID)
 
@@ -314,6 +339,12 @@ func (s *Server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	authCtx, _ := AuthFromContext(r.Context())
+
+	if !authCtx.IsAdmin {
+		writeError(w, r, http.StatusForbidden, "FORBIDDEN", "Only workspace owners can remove members", nil)
+		return
+	}
+
 	if memberID == authCtx.UserID {
 		writeError(w, r, http.StatusBadRequest, "CANNOT_REMOVE_SELF", "You cannot remove yourself from the team", nil)
 		return
